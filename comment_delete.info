@@ -1,0 +1,5 @@
+name = Comment Deletion
+core = 7.x
+description = "Deletion of comments for selected node types"
+dependencies[] = comment
+configure = admin/config/system/comment_delete

@@ -1,0 +1,12 @@
+<?php
+/**
+ * @file
+ * Install, uninstall, and update functions for comment_delete.module.
+ */
+
+/**
+ * Implements hook_uninstall().
+ */
+function comment_delete_uninstall() {
+  variable_del('comment_delete_types');
+}

@@ -1,0 +1,197 @@
+<?php
+/**
+ * @file
+ * Provide structure for the administrative interface to select content type.
+ */
+
+/**
+ * Implements hook_help().
+ */
+function comment_delete_help($path, $arg) {
+  switch ($path) {
+    case 'admin/help#comment_delete':
+      $output = '';
+      $output .= '<p>' . t('This Module delete the comments for the selected content types.') . '</p>';
+      $output .= '<h6>' . t('Installation') . '</h6>';
+      $output .= '<ol>';
+      $output .= '<li>' . t('Install as you would normally install a contributed Drupal module. See: https://drupal.org/documentation/install/modules-themes/modules-7 for further information.
+      ') . '</li>';
+      $output .= '</ol>';
+      $output .= '<h6>' . t('Configuration') . '</h6>';
+      $output .= '<ul>';
+      $output .= '<li>' . t('Go to configuration link in admin menu.') . '</li>';
+      $output .= '<li>' . t('Configuration -> System -> Comment Delete') . '</li>';
+      $output .= '</ul>';
+      $output .= '<h6>' . t('Usage') . '</h6>';
+      $output .= '<ul>';
+      $output .= '<li>' . t('Configuration -> System -> Comment Delete') . '</li>';
+      $output .= '<li>' . t('Select one or more content type') . '</li>';
+      $output .= '<li>' . t('Save Configuration') . '</li>';
+      $output .= '<li>' . t('Click on start batch link.') . '</li>';
+      $output .= '<li>' . t('Click Execute Batch.') . '</li>';
+      $output .= '<li>' . t('After deletion of comment message will appear " @count Comments has deleted
+for the selected content type"') . '</li>';
+      $output .= '</ul>';
+      return $output;
+  }
+}
+
+/**
+ * Implements hook_menu().
+ */
+function comment_delete_menu() {
+  $items['admin/config/system/comment_delete'] = array(
+    'title' => 'Comment Delete',
+    'description' => 'Set types of nodes for which comments will be delete.',
+    'page callback' => 'drupal_get_form',
+    'page arguments' => array('comment_delete_settings_form'),
+    'access arguments' => array('administer comment delete'),
+    'weight' => -10,
+    'file' => 'comment_delete.admin.inc',
+  );
+  $items['admin/comment_delete_batch'] = array(
+    'title' => 'Delete Comment Batch',
+    'description' => 'Execute Batch For Delete Comment',
+    'page callback' => 'drupal_get_form',
+    'page arguments' => array('comment_delete_batch'),
+    'access arguments' => array('administer comment delete'),
+    'weight' => -10,
+    'type' => MENU_CALLBACK,
+  );
+  return $items;
+}
+
+/**
+ * Implements hook_permission().
+ */
+function comment_delete_permission() {
+  return array(
+    'administer comment delete' => array(
+      'title' => t('Administer automatic comment deletion.'),
+    ),
+  );
+}
+/**
+ * Callback for Comment delete configuration form.
+ */
+function comment_delete_batch($form, &$form_state) {
+  $selected_type = variable_get('comment_delete_types', '');
+  $form = array();
+  if (count($selected_type) == 0) {
+    $form['error_text'] = array(
+      '#type' => 'link',
+      '#title' => t('Go to configuration page'),
+      '#prefix' => t('You have not selected any content type.please select any content type.'),
+      '#href' => 'admin/config/system/comment_delete',
+      '#weight' => 10,
+    );
+  }
+  else {
+    $form['execute_batch'] = array(
+      '#type' => 'submit',
+      '#value' => t('Execute Batch'),
+      '#suffix' => '<pre><strong>Note:</strong> Execute Batch for delete Comments for the selected content type.</pre>',
+      '#weight' => 10,
+    );
+  }
+  return $form;
+}
+/**
+ * Callback for comment_delete_batch_process().
+ */
+function comment_delete_batch_submit($form, &$form_state) {
+  // Execute the function comment_delete_batch_process
+  batch_set('comment_delete_batch_process');
+}
+/**
+ * Callback for batch Process.
+ */
+function comment_delete_batch_process() {
+
+  // Give helpful information about how many nodes are being operated on.
+  $node_count = comment_delete_node_type_count();
+  $node_type_count = count($node_count);
+  drupal_set_message(t('@node_count Nodes found', array('@node_count' => $node_type_count, '@count' => ceil($node_type_count / 5))));
+  $operations = array();
+  for ($i = 0; $i < $node_type_count; $i++) {
+    $operations[] = array('comment_delete_batch_operation',
+      array($node_type_count, $node_count[$i], $i),
+    );
+  }
+  $batch = array(
+    'operations' => $operations,
+    'finished' => 'comment_delete_batch_finish',
+  // Message displayed while processing the batch. Available placeholders are:
+  // These placeholders are replaced with actual values in _batch_process(),
+  // nodes per operation.
+  // Defaults to t('Completed @current of @total.').
+    'title' => t('Processing batch'),
+    'init_message' => t('Batch is starting.'),
+    'progress_message' => t('Processed @current out of @total.'),
+    'error_message' => t('Batch has encountered an error.'),
+  );
+  return $batch;
+}
+
+/**
+ * Callback for batch operation.
+ */
+function comment_delete_batch_operation($node_count, $node_nid, $counter, &$context) {
+  // Here we actually perform our 'deletion of comments' on the current node.
+  $node = node_load($node_nid, NULL, TRUE);
+  if ($node->cid) {
+    $cid = db_select('comment', 'c')
+      ->fields('c', array('cid'))
+      ->condition('nid', $node->nid, '=')
+      ->execute()
+      ->fetchCol();
+    if (isset($context['results']['comment_count'])) {
+      $context['results']['comment_count'] += $node->comment_count;
+    }
+    else {
+      $context['results']['comment_count'] = $node->comment_count;
+    }
+    comment_delete_multiple($cid);
+    unset($cid);
+  }
+
+}
+
+
+/**
+ * Callback for deletion of multiple comments.
+ */
+function comment_delete_batch_finish($success, $results, $operations) {
+  if ($success) {
+    // Display the number of comments deleted...
+    drupal_set_message(t('%final Comments deleted', array('%final' => end($results))));
+  }
+  else {
+    // An error occurred.
+    // $operations contains the operations that remained unprocessed.
+    $error_operation = reset($operations);
+    drupal_set_message(
+      t('An error occurred while processing @operation with arguments : @args',
+      array(
+        '@operation' => $error_operation[0],
+        '@args' => print_r($error_operation[0], TRUE),
+      )));
+  }
+}
+
+/**
+ * Callback for count of nodes.
+ */
+function comment_delete_node_type_count() {
+  // Gives nid of nodes for which comments needs to be delete.
+  $content_type = variable_get('comment_delete_types', '');
+  $result = db_select('node', 'n');
+  $result->join('comment', 'c', 'n.nid = c.nid');
+  $result->condition('n.type', $content_type, 'IN');
+  $result->condition('n.status', 1);
+  $result->fields('n', array('nid'));
+  $result->distinct();
+  $result->orderBy('n.nid', 'ASC');
+  $res = $result->execute()->fetchcol();
+  return $res;
+}
